@@ -29,7 +29,7 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4444;
 app.listen(PORT, () => {
   logger.info(`WHM API server running at http://localhost:${PORT}/`);
   logger.info(`For MCP functionality, use the mcp-server-compat.js file directly`);
