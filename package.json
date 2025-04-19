@@ -1,31 +1,28 @@
 {
-  "name": "whm-mcp-server",
+  "name": "whm",
   "version": "1.0.0",
-  "description": "MCP server for WHM administration through Cursor",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "jest"
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "example": "node examples/mcp-client-test.js"
   },
-  "keywords": [
-    "mcp",
-    "cursor",
-    "whm",
-    "cpanel",
-    "server"
-  ],
+  "keywords": [],
   "author": "",
-  "license": "MIT",
+  "license": "ISC",
+  "description": "MCP server to connect to WHM for server administration",
   "dependencies": {
-    "axios": "^1.4.0",
-    "express": "^4.18.2",
-    "uuid": "^9.0.0",
-    "winston": "^3.8.2",
-    "ws": "^8.13.0"
+    "axios": "^1.8.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "eventsource": "^2.0.2",
+    "express": "^5.1.0",
+    "express-validator": "^7.2.1",
+    "node-fetch": "^2.7.0",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
-    "jest": "^29.5.0",
-    "nodemon": "^2.0.22"
+    "nodemon": "^3.1.9"
   }
 }
