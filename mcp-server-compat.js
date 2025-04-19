@@ -227,8 +227,8 @@ function handleSSE(req, res) {
   });
 }
 
-// Start the server
-const PORT = process.env.PORT || 3000;
+// Start the server with a different port since 3000 is in use
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   log(`MCP Server running at http://localhost:${PORT}/`);
   log(`SSE endpoint available at http://localhost:${PORT}/sse`);
