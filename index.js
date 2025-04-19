@@ -1,12 +1,10 @@
+// Main MCP Server implementation
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const dotenv = require('dotenv');
 const { createLogger, format, transports } = require('winston');
+const { v4: uuidv4 } = require('uuid');
 const { whmTools } = require('./whm-admin-mcp');
-
-// Load environment variables
-dotenv.config();
 
 // Configure logger
 const logger = createLogger({
@@ -23,174 +21,241 @@ const logger = createLogger({
   ]
 });
 
-// Initialize Express app
+// Create Express app and HTTP server
 const app = express();
-app.use(express.json());
-
-// Create HTTP server
 const server = http.createServer(app);
-
-// Set up WebSocket server
-const wss = new WebSocket.Server({ server });
-
-// Server info
 const PORT = process.env.PORT || 3001;
-const SERVER_NAME = 'WHM Administration MCP Server';
-const SERVER_VERSION = '1.0.0';
 
-// Available tools from WHM admin module
-const availableTools = whmTools;
+// WebSocket server
+const wss = new WebSocket.Server({ server });
 
 // Store active connections
 const connections = new Map();
 
-// Handle WebSocket connections
-wss.on('connection', (ws) => {
-  const connectionId = Date.now().toString();
-  connections.set(connectionId, { ws, name: 'unknown' });
-  
-  logger.info(`New connection established: ${connectionId}`);
-  
-  // Send connection/ready message immediately upon connection
-  const readyMessage = {
-    type: 'connection/ready',
-    data: {
-      name: SERVER_NAME,
-      version: SERVER_VERSION
-    }
-  };
-  ws.send(JSON.stringify(readyMessage));
-  
-  // Send available tools right after connection/ready
-  const toolsMessage = {
-    type: 'tools/update',
-    data: {
-      tools: availableTools
-    }
-  };
-  ws.send(JSON.stringify(toolsMessage));
-  
-  ws.on('message', async (message) => {
-    try {
-      const parsedMessage = JSON.parse(message);
-      logger.debug(`Received message: ${JSON.stringify(parsedMessage)}`);
-      
-      // Handle different message types
-      switch (parsedMessage.type) {
-        case 'connection/ping':
-          ws.send(JSON.stringify({
-            type: 'connection/pong',
-            data: parsedMessage.data || {}
-          }));
-          break;
-          
-        case 'connection/hello':
-          const name = parsedMessage.data?.name || 'unknown';
-          connections.set(connectionId, { ws, name });
-          logger.info(`Client identified as: ${name}`);
-          
-          // Respond with server info
-          ws.send(JSON.stringify({
-            type: 'connection/hello',
-            data: {
-              name: SERVER_NAME,
-              version: SERVER_VERSION
-            }
-          }));
-          break;
-          
-        case 'tools/request':
-          // Respond with available tools
-          ws.send(JSON.stringify({
-            type: 'tools/update',
-            data: {
-              tools: availableTools
-            }
-          }));
-          break;
-          
-        case 'tool/invoke':
-          const { id, name, parameters } = parsedMessage.data;
-          
-          // Find the tool implementation
-          const toolFunction = availableTools.find(tool => tool.name === name)?.function;
-          
-          if (!toolFunction) {
-            ws.send(JSON.stringify({
-              type: 'tool/response',
-              data: {
-                id,
-                status: 'error',
-                error: {
-                  message: `Tool not found: ${name}`
-                }
-              }
-            }));
-            break;
-          }
-          
-          try {
-            logger.info(`Invoking tool: ${name}`);
-            // Execute the tool function
-            const result = await toolFunction(parameters);
-            
-            // Send successful response
-            ws.send(JSON.stringify({
-              type: 'tool/response',
-              data: {
-                id,
-                status: 'success',
-                result
-              }
-            }));
-          } catch (error) {
-            logger.error(`Error executing tool ${name}: ${error.message}`);
-            
-            // Send error response
-            ws.send(JSON.stringify({
-              type: 'tool/response',
-              data: {
-                id,
-                status: 'error',
-                error: {
-                  message: error.message
-                }
-              }
-            }));
-          }
-          break;
-          
-        default:
-          logger.warn(`Unknown message type: ${parsedMessage.type}`);
-      }
-    } catch (error) {
-      logger.error(`Error processing message: ${error.message}`);
-    }
-  });
-  
-  ws.on('close', () => {
-    logger.info(`Connection closed: ${connectionId}`);
-    connections.delete(connectionId);
-  });
-  
-  ws.on('error', (error) => {
-    logger.error(`WebSocket error: ${error.message}`);
-  });
-});
+// API key for authentication
+const API_KEY = process.env.API_KEY || 'YOUR_DEFAULT_API_KEY'; // Replace in production
+
+// Middleware
+app.use(express.json());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    serverName: SERVER_NAME,
-    version: SERVER_VERSION,
-    connections: connections.size
+  res.status(200).json({ status: 'ok', version: '1.0.0' });
+});
+
+// Prepare MCP tool definitions for sending to clients
+const toolDefinitions = whmTools.map(tool => ({
+  name: tool.name,
+  description: tool.description,
+  parameters: tool.parameters
+}));
+
+// Handle WebSocket connections
+wss.on('connection', (ws) => {
+  const connectionId = uuidv4();
+  
+  logger.info(`New WebSocket connection established: ${connectionId}`);
+  
+  connections.set(connectionId, {
+    ws,
+    authenticated: false,
+    pendingRequests: new Map()
+  });
+  
+  // Set up ping interval for connection health
+  const pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+    }
+  }, 30000);
+  
+  // Send connection/ready message
+  sendMessage(ws, {
+    type: 'connection/ready',
+    connectionId: connectionId
+  });
+  
+  // Send available tools message
+  sendMessage(ws, {
+    type: 'tools/update',
+    tools: toolDefinitions
+  });
+  
+  // Handle incoming messages
+  ws.on('message', async (messageData) => {
+    try {
+      const message = JSON.parse(messageData);
+      
+      // Log incoming message (excluding sensitive data)
+      const logSafeMessage = { ...message };
+      if (logSafeMessage.authentication) {
+        logSafeMessage.authentication = '[REDACTED]';
+      }
+      logger.debug(`Received message: ${JSON.stringify(logSafeMessage)}`);
+      
+      // Handle different message types
+      switch (message.type) {
+        case 'authentication/token':
+          handleAuthentication(connectionId, message);
+          break;
+          
+        case 'tools/invoke':
+          if (!connections.get(connectionId).authenticated) {
+            sendError(ws, message.id, 'Not authenticated', 401);
+            break;
+          }
+          await handleToolInvocation(connectionId, message);
+          break;
+          
+        case 'tools/list':
+          if (!connections.get(connectionId).authenticated) {
+            sendError(ws, message.id, 'Not authenticated', 401);
+            break;
+          }
+          sendMessage(ws, {
+            type: 'tools/list',
+            id: message.id,
+            tools: toolDefinitions
+          });
+          break;
+          
+        default:
+          logger.warn(`Unknown message type: ${message.type}`);
+          sendError(ws, message.id, `Unknown message type: ${message.type}`, 400);
+      }
+    } catch (error) {
+      logger.error(`Error processing message: ${error.message}`);
+      sendError(ws, null, 'Invalid message format', 400);
+    }
+  });
+  
+  // Handle connection close
+  ws.on('close', () => {
+    logger.info(`WebSocket connection closed: ${connectionId}`);
+    clearInterval(pingInterval);
+    connections.delete(connectionId);
+  });
+  
+  // Handle connection errors
+  ws.on('error', (error) => {
+    logger.error(`WebSocket error for ${connectionId}: ${error.message}`);
   });
 });
 
+// Authentication handler
+function handleAuthentication(connectionId, message) {
+  const connection = connections.get(connectionId);
+  const ws = connection.ws;
+  
+  if (!message.authentication || !message.authentication.token) {
+    sendError(ws, message.id, 'Authentication token required', 401);
+    return;
+  }
+  
+  // Compare with configured API key
+  if (message.authentication.token === API_KEY) {
+    connection.authenticated = true;
+    logger.info(`Client authenticated: ${connectionId}`);
+    
+    // Send success response
+    sendMessage(ws, {
+      type: 'authentication/success',
+      id: message.id
+    });
+    
+    // Send tools update after successful authentication
+    sendMessage(ws, {
+      type: 'tools/update',
+      tools: toolDefinitions
+    });
+  } else {
+    logger.warn(`Failed authentication attempt: ${connectionId}`);
+    sendError(ws, message.id, 'Invalid authentication token', 401);
+  }
+}
+
+// Tool invocation handler
+async function handleToolInvocation(connectionId, message) {
+  const connection = connections.get(connectionId);
+  const ws = connection.ws;
+  
+  if (!message.name || !whmTools.find(t => t.name === message.name)) {
+    sendError(ws, message.id, `Unknown tool: ${message.name}`, 400);
+    return;
+  }
+  
+  const tool = whmTools.find(t => t.name === message.name);
+  
+  try {
+    logger.info(`Invoking tool ${message.name} with request ID ${message.id}`);
+    
+    // Track pending request
+    connection.pendingRequests.set(message.id, {
+      tool: message.name,
+      startTime: Date.now()
+    });
+    
+    // Execute tool function
+    const result = await tool.function(message.parameters || {});
+    
+    // Request completed
+    connection.pendingRequests.delete(message.id);
+    
+    // Send success response
+    sendMessage(ws, {
+      type: 'tools/invoke/response',
+      id: message.id,
+      result: result
+    });
+    
+    logger.info(`Tool ${message.name} execution completed for request ${message.id}`);
+  } catch (error) {
+    logger.error(`Tool ${message.name} execution failed: ${error.message}`);
+    connection.pendingRequests.delete(message.id);
+    sendError(ws, message.id, `Tool execution failed: ${error.message}`, 500);
+  }
+}
+
+// Helper to send messages
+function sendMessage(ws, message) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+    
+    // Log outgoing message (for debugging)
+    logger.debug(`Sent message: ${JSON.stringify(message)}`);
+  }
+}
+
+// Helper to send error responses
+function sendError(ws, requestId, errorMessage, statusCode = 500) {
+  sendMessage(ws, {
+    type: 'error',
+    id: requestId,
+    error: {
+      message: errorMessage,
+      status: statusCode
+    }
+  });
+}
+
 // Start the server
 server.listen(PORT, () => {
-  logger.info(`${SERVER_NAME} running on port ${PORT}`);
-  logger.info(`WebSocket server available at ws://localhost:${PORT}`);
-  logger.info(`Health check available at http://localhost:${PORT}/health`);
+  logger.info(`MCP Server listening on port ${PORT}`);
 });
+
+// Handle server shutdown
+process.on('SIGINT', () => {
+  logger.info('Server shutting down...');
+  
+  // Close all WebSocket connections
+  wss.clients.forEach(client => {
+    client.terminate();
+  });
+  
+  server.close(() => {
+    logger.info('Server shutdown complete');
+    process.exit(0);
+  });
+});
+
+module.exports = server; // Export for testing
