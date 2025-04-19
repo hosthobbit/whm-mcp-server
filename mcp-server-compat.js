@@ -187,6 +187,21 @@ const sendSSEMessage = (res, data) => {
   res.write(`data: ${message}\n\n`);
 };
 
+// Send capabilities message
+const sendCapabilities = (res) => {
+  sendSSEMessage(res, {
+    jsonrpc: "2.0",
+    method: "server/capabilities",
+    params: {
+      capabilities: {
+        tools: true,
+        resources: true
+      },
+      tools: availableTools
+    }
+  });
+};
+
 // Create HTTP server
 const server = http.createServer(async (req, res) => {
   const timestamp = new Date().toISOString();
@@ -249,18 +264,15 @@ const server = http.createServer(async (req, res) => {
       }
     });
 
-    // Send capabilities immediately after connection
-    sendSSEMessage(res, {
-      jsonrpc: "2.0",
-      method: "server/capabilities",
-      params: {
-        capabilities: {
-          tools: true,
-          resources: true
-        },
-        tools: availableTools
-      }
-    });
+    // Send capabilities after a short delay
+    setTimeout(() => {
+      sendCapabilities(res);
+      
+      // Send a second capabilities message after another delay
+      setTimeout(() => {
+        sendCapabilities(res);
+      }, 1000);
+    }, 500);
 
     console.log(`${timestamp} - SSE connection established for client: ${clientId}`);
     return;
@@ -317,6 +329,9 @@ const server = http.createServer(async (req, res) => {
             }
           }
         }));
+
+        // Send capabilities again after initialization
+        sendCapabilities(client.res);
         return;
       }
 
