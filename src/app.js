@@ -28,9 +28,11 @@ if (!fs.existsSync(logsDir)) {
 
 // Routes
 const exampleRoutes = require('./routes/example');
+const sseRoutes = require('./routes/sse');
 
 // Register routes
 app.use('/api/examples', exampleRoutes);
+app.use('/api/sse', sseRoutes);
 
 // Root route
 app.get('/', (req, res) => {
