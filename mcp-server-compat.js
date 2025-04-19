@@ -362,10 +362,11 @@ function gracefulShutdown() {
   }, 10000);
 }
 
-// Start server
+// Start server - explicitly bind to all interfaces (0.0.0.0)
 const PORT = process.env.PORT || 4444;
-server.listen(PORT, () => {
+const HOST = '0.0.0.0'; // Listen on all interfaces, not just localhost
+server.listen(PORT, HOST, () => {
   const timestamp = new Date().toISOString();
-  console.log(`${timestamp} - MCP Server running at http://localhost:${PORT}/`);
-  console.log(`${timestamp} - SSE endpoint available at http://localhost:${PORT}/sse`);
+  console.log(`${timestamp} - MCP Server running at http://${HOST}:${PORT}/`);
+  console.log(`${timestamp} - SSE endpoint available at http://${HOST}:${PORT}/sse`);
 });
