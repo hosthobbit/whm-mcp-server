@@ -1,133 +1,93 @@
-# WebHost Manager (WHM) MCP Server
+# WHM Administration MCP Server
 
-A specialized MCP (Model, Channel, Protocol) server designed for WebHost Manager (WHM) administration through Cursor AI. This implementation allows you to manage cPanel accounts, domains, and server resources directly through Cursor's AI assistant.
+A specialized MCP (Machine Conversion Protocol) server for WebHost Manager (WHM) administration through Cursor IDE.
 
 ## Features
 
-- **Complete cPanel Account Management:**
-  - List, create, suspend, unsuspend, and terminate accounts
-  - View detailed account information
-  - Change account passwords
-  - Create account backups
-
-- **Domain Management:**
-  - Add domains to existing accounts
-  - List all domains on the server
-  - Get detailed domain information
-
-- **Server Information:**
-  - View server status (CPU, memory, disk usage)
-  - List available hosting packages/plans
-
-- **Cursor AI Integration:**
-  - Chat with Cursor AI to perform WHM administrative tasks
-  - No need to remember complex WHM API endpoints or parameters
-  - Use natural language to manage your hosting server
+- **Admin Tools**: Manage cPanel accounts, monitor server status, and perform administrative tasks
+- **MCP Protocol Support**: Full implementation of the MCP protocol for Cursor and Claude integration
+- **Secure Authentication**: API key authentication for all protected routes
 
 ## Setup Instructions
 
-1. **Clone the Repository:**
-   ```bash
+1. Clone this repository:
+   ```
    git clone https://github.com/hosthobbit/whm-mcp-server.git
    cd whm-mcp-server
    ```
 
-2. **Install Dependencies:**
-   ```bash
+2. Install dependencies:
+   ```
    npm install
    ```
 
-3. **Configure the Server:**
-   
-   Edit the `whm-admin-mcp.js` file and update the configuration:
-   ```javascript
-   const config = {
-     whmApiUrl: 'https://yourserver.com:2087/json-api/',  // Change to your WHM server address
-     whmApiToken: 'your_api_token_here',                  // Change to your WHM API token
-     mcpPort: 4444,                                       // Port for the MCP server to listen on
-     mcpHost: '0.0.0.0'                                   // Interface for the MCP server to bind to
-   };
+3. Create a `.env` file in the root directory with your configuration:
    ```
-   
-   To generate a WHM API token, log in to your WHM interface and navigate to:
-   Development > API Tokens > Generate Token
-
-4. **Start the Server:**
-   ```bash
-   node whm-admin-mcp.js
+   PORT=3001
+   WHM_API_URL=https://yourdomain.com:2087/json-api/
+   WHM_API_TOKEN=your_whm_api_token
    ```
 
-5. **Configure Cursor:**
-   
-   Add the following to your `mcp.json` in your Cursor configuration:
-   ```json
-   {
-     "servers": [
-       {
-         "name": "WHM Administration",
-         "url": "http://your-server-ip:4444/sse",
-         "protocol_version": "2025-03-26",
-         "retryIntervalMs": 1000,
-         "connectionTimeoutMs": 10000
-       }
-     ]
-   }
+4. Start the server:
    ```
+   node index.js
+   ```
+
+## WHM API Integration
+
+This server requires a WHM API token for authentication with your WHM server. To generate a token:
+
+1. Log in to your WHM as root
+2. Navigate to Development → Manage API Tokens
+3. Create a new token and set appropriate permissions
+4. Copy the token to your `.env` file
 
 ## Available MCP Tools
 
-The server provides the following tools for WHM administration:
-
 | Tool Name | Description |
 |-----------|-------------|
-| `list_accounts` | List cPanel accounts on the server |
-| `create_account` | Create a new cPanel account |
-| `get_account_info` | Get detailed information about a cPanel account |
-| `suspend_account` | Suspend a cPanel account |
-| `unsuspend_account` | Unsuspend a cPanel account |
-| `terminate_account` | Permanently delete a cPanel account |
-| `list_packages` | List available hosting packages/plans |
-| `server_status` | Get server status information (CPU, memory, disk usage) |
-| `list_domains` | List all domains on the server |
-| `get_domain_info` | Get information about a specific domain |
-| `add_domain` | Add a domain to an existing account |
-| `change_password` | Change password for a cPanel account |
-| `backup_account` | Create a backup of a cPanel account |
+| whm_list_accounts | List all cPanel accounts on the server |
+| whm_create_account | Create a new cPanel account |
+| whm_suspend_account | Suspend a cPanel account |
+| whm_unsuspend_account | Unsuspend a cPanel account |
+| whm_terminate_account | Permanently terminate a cPanel account |
+| whm_server_status | Get server status information |
+| whm_list_domains | List all domains on the server |
+| whm_backup_account | Create a backup of a cPanel account |
 
-## Usage Examples
+## Using with Cursor & Claude
 
-With Cursor AI, you can perform tasks like:
+1. Configure your Cursor IDE to connect to your MCP server
+2. Add the following to your `mcp.json` file:
+   ```json
+   {
+     "mcpEndpoint": "ws://your-server-ip:3001"
+   }
+   ```
+3. Once connected, Claude will have access to all WHM administration tools
 
-- "List all cPanel accounts on my server"
-- "Create a new cPanel account for domain example.com"
-- "Suspend the user john_doe due to payment issues"
-- "What's the current server status?"
-- "Add the domain newdomain.com to the account user123"
-- "Change the password for account client456"
+## Production Deployment
 
-Cursor AI will use the appropriate WHM API tools to execute these tasks.
+For production use, we recommend:
 
-## Security Considerations
-
-- Store your WHM API token securely
-- Consider running the MCP server behind a reverse proxy with SSL
-- Only allow access to the MCP server from trusted IP addresses
-- Use a strong, unique API token with minimal necessary permissions
+1. Running behind a reverse proxy (Nginx/Apache) with SSL
+2. Using PM2 for process management:
+   ```
+   npm install -g pm2
+   pm2 start index.js --name "whm-mcp-server"
+   ```
 
 ## Troubleshooting
 
-If you encounter issues:
-
-1. Check server logs for any error messages
-2. Verify your WHM API token has the necessary permissions
-3. Ensure your WHM server is accessible from the MCP server
-4. Confirm that CORS headers are properly set if accessing from different domains
+If Cursor cannot discover tools:
+1. Check that the server is running and accessible
+2. Verify the WebSocket connection is properly configured
+3. Examine server logs for any protocol errors
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT
 
-## Acknowledgments
+## Contributing
 
-- [Cursor AI](https://cursor.sh/) for providing the AI assistant integration
-- cPanel/WHM for their comprehensive API
+Contributions are welcome! Please feel free to submit a Pull Request.
