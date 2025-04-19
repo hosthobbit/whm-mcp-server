@@ -1,6 +1,5 @@
 /**
- * Improved MCP server for Cursor integration
- * With proper JSON-RPC 2.0 format and session handling
+ * MCP server for Cursor integration with proper tool discovery
  */
 
 const http = require('http');
@@ -10,6 +9,33 @@ const querystring = require('querystring');
 // Client connections
 const clients = new Map();
 let clientIdCounter = 0;
+
+// Available tools
+const availableTools = [
+  {
+    name: "example_tool",
+    description: "An example tool to demonstrate MCP integration",
+    parameters: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "A message to echo back"
+        }
+      },
+      required: ["message"]
+    }
+  },
+  {
+    name: "get_server_status",
+    description: "Get the current status of the WHM MCP server",
+    parameters: {
+      type: "object",
+      properties: {},
+      required: []
+    }
+  }
+];
 
 // Parse JSON request body
 const parseJsonBody = (req) => {
@@ -23,7 +49,7 @@ const parseJsonBody = (req) => {
         try {
           resolve(JSON.parse(body));
         } catch (e) {
-          reject(new Error('Invalid JSON'));
+          reject(new Error('Invalid JSON: ' + e.message));
         }
       } else {
         resolve({});
@@ -31,6 +57,17 @@ const parseJsonBody = (req) => {
     });
     req.on('error', reject);
   });
+};
+
+// Send SSE message to client
+const sendSSEMessage = (res, data) => {
+  try {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    return true;
+  } catch (err) {
+    console.error(`Error sending SSE message: ${err.message}`);
+    return false;
+  }
 };
 
 // Create HTTP server
@@ -84,7 +121,9 @@ const server = http.createServer(async (req, res) => {
     // Store the client connection
     clients.set(clientId, {
       res: res,
-      lastActivity: Date.now()
+      lastActivity: Date.now(),
+      sessionId: clientId,
+      initialized: false
     });
     
     // Handle client disconnect
@@ -108,8 +147,15 @@ const server = http.createServer(async (req, res) => {
       }
     }, 15000);
     
-    // The MCP protocol expects the client to send an initialize message first
-    // So we'll just wait for the client to send that and not respond right away
+    // Send initial connection establishment message
+    sendSSEMessage(res, {
+      jsonrpc: "2.0", 
+      method: "connection/ready",
+      params: { 
+        session_id: clientId
+      }
+    });
+    
     console.log(`${timestamp} - SSE connection established for client: ${clientId}`);
     return;
   }
@@ -157,92 +203,49 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       
+      const client = clients.get(sessionId);
+      
       // Handle different methods
       if (method === "initialize") {
-        // Client is initializing the connection
-        const clientConnection = clients.get(sessionId);
-        if (clientConnection) {
-          // Send initialize response with available tools
-          clientConnection.res.write(`data: ${JSON.stringify({
-            jsonrpc: "2.0",
-            id: id, // Use the same ID the client sent
-            result: {
-              tools: [
-                {
-                  name: "example_tool",
-                  description: "An example tool to show MCP integration",
-                  parameters: {
-                    type: "object",
-                    properties: {
-                      message: {
-                        type: "string",
-                        description: "A message to echo back"
-                      }
-                    },
-                    required: ["message"]
-                  }
-                },
-                {
-                  name: "get_server_status",
-                  description: "Get the current status of the WHM MCP server",
-                  parameters: {
-                    type: "object",
-                    properties: {},
-                    required: []
-                  }
-                }
-              ]
-            }
-          })}\n\n`);
-        }
+        // Mark client as initialized
+        client.initialized = true;
         
-        // Also respond to the HTTP request
+        // Respond to initialize request
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
-          id: id,
-          result: {}
+          id,
+          result: { 
+            // Add any initialization data here
+          }
         }));
+        
+        // Also send the tools list through SSE
+        sendSSEMessage(client.res, {
+          jsonrpc: "2.0",
+          id: "tools_list",
+          result: {
+            tools: availableTools
+          }
+        });
+        
         return;
       }
       
+      // Tools/list method - respond with available tools
       if (method === "tools/list") {
-        // Return available tools
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
           id,
           result: {
-            tools: [
-              {
-                name: "example_tool",
-                description: "An example tool to show MCP integration",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    message: {
-                      type: "string",
-                      description: "A message to echo back"
-                    }
-                  },
-                  required: ["message"]
-                }
-              },
-              {
-                name: "get_server_status",
-                description: "Get the current status of the WHM MCP server",
-                parameters: {
-                  type: "object",
-                  properties: {},
-                  required: []
-                }
-              }
-            ]
+            tools: availableTools
           }
         }));
         return;
       }
       
+      // Invoke method - handle tool calls
       if (method === "invoke") {
         const { name, parameters } = params;
         
@@ -336,14 +339,14 @@ function gracefulShutdown() {
   // Notify all clients about the shutdown
   clients.forEach((client, clientId) => {
     try {
-      client.res.write(`data: ${JSON.stringify({
+      sendSSEMessage(client.res, {
         jsonrpc: "2.0",
-        id: "server_shutdown",
         method: "notification",
         params: {
+          type: "shutdown",
           message: "Server is shutting down"
         }
-      })}\n\n`);
+      });
     } catch (err) {
       console.log(`${timestamp} - Error notifying client ${clientId} about shutdown: ${err.message}`);
     }
