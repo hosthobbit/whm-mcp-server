@@ -1,0 +1,3 @@
+@echo off
+echo Starting WHM Management Control Panel Server...
+npm start
