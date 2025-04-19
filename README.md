@@ -1,89 +1,133 @@
-# WHM MCP Server
+# WebHost Manager (WHM) MCP Server
 
-A secure MCP server for Cursor integration.
+A specialized MCP (Model, Channel, Protocol) server designed for WebHost Manager (WHM) administration through Cursor AI. This implementation allows you to manage cPanel accounts, domains, and server resources directly through Cursor's AI assistant.
 
 ## Features
 
-- Model Context Protocol (MCP) support
-- Server-Sent Events (SSE) endpoint
-- Detailed logging
-- Compatible with older Node.js versions
-- Support for custom tools
+- **Complete cPanel Account Management:**
+  - List, create, suspend, unsuspend, and terminate accounts
+  - View detailed account information
+  - Change account passwords
+  - Create account backups
 
-## Setup
+- **Domain Management:**
+  - Add domains to existing accounts
+  - List all domains on the server
+  - Get detailed domain information
 
-1. Clone the repository:
-   ```
+- **Server Information:**
+  - View server status (CPU, memory, disk usage)
+  - List available hosting packages/plans
+
+- **Cursor AI Integration:**
+  - Chat with Cursor AI to perform WHM administrative tasks
+  - No need to remember complex WHM API endpoints or parameters
+  - Use natural language to manage your hosting server
+
+## Setup Instructions
+
+1. **Clone the Repository:**
+   ```bash
    git clone https://github.com/hosthobbit/whm-mcp-server.git
    cd whm-mcp-server
    ```
 
-2. Start the MCP server:
+2. **Install Dependencies:**
+   ```bash
+   npm install
    ```
-   node mcp-server-compat.js
+
+3. **Configure the Server:**
+   
+   Edit the `whm-admin-mcp.js` file and update the configuration:
+   ```javascript
+   const config = {
+     whmApiUrl: 'https://yourserver.com:2087/json-api/',  // Change to your WHM server address
+     whmApiToken: 'your_api_token_here',                  // Change to your WHM API token
+     mcpPort: 4444,                                       // Port for the MCP server to listen on
+     mcpHost: '0.0.0.0'                                   // Interface for the MCP server to bind to
+   };
    ```
    
-   The server runs on port 3001 by default.
+   To generate a WHM API token, log in to your WHM interface and navigate to:
+   Development > API Tokens > Generate Token
 
-3. To run on a different port:
-   ```
-   PORT=4444 node mcp-server-compat.js
-   ```
-
-## Endpoints
-
-The server includes the following endpoints:
-
-- `GET /` - Root endpoint, returns server info
-- `GET /sse` - Server-Sent Events endpoint for MCP integration
-
-## Tools
-
-The MCP server provides the following tools:
-
-- `example_tool` - An example tool that echoes back a message
-- `get_server_status` - Returns the current server status, uptime, and memory usage
-
-## Integration with Cursor
-
-1. Open Cursor IDE
-2. Go to Settings
-3. Add the following to your `mcp.json` configuration:
-
-```json
-{
-  "mcpServers": {
-    "whm": {
-      "url": "http://localhost:3001/sse"
-    }
-  }
-}
-```
-
-4. Replace `localhost` with your server's hostname or IP address if deployed elsewhere
-
-## Production Deployment
-
-For production deployment:
-
-1. Deploy to your VPS or server
-2. Ensure the server is accessible via HTTP
-3. Update your Cursor configuration to point to the deployed server
-4. Consider using a process manager like PM2:
-   ```
-   npm install -g pm2
-   pm2 start mcp-server-compat.js
+4. **Start the Server:**
+   ```bash
+   node whm-admin-mcp.js
    ```
 
-## Port Configuration
+5. **Configure Cursor:**
+   
+   Add the following to your `mcp.json` in your Cursor configuration:
+   ```json
+   {
+     "servers": [
+       {
+         "name": "WHM Administration",
+         "url": "http://your-server-ip:4444/sse",
+         "protocol_version": "2025-03-26",
+         "retryIntervalMs": 1000,
+         "connectionTimeoutMs": 10000
+       }
+     ]
+   }
+   ```
 
-The server uses port 3001 by default to avoid conflicts with common applications:
-- Port 3000 is often used by other web applications
-- To change the port, set the PORT environment variable:
-  ```
-  PORT=5000 node mcp-server-compat.js
-  ```
+## Available MCP Tools
+
+The server provides the following tools for WHM administration:
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_accounts` | List cPanel accounts on the server |
+| `create_account` | Create a new cPanel account |
+| `get_account_info` | Get detailed information about a cPanel account |
+| `suspend_account` | Suspend a cPanel account |
+| `unsuspend_account` | Unsuspend a cPanel account |
+| `terminate_account` | Permanently delete a cPanel account |
+| `list_packages` | List available hosting packages/plans |
+| `server_status` | Get server status information (CPU, memory, disk usage) |
+| `list_domains` | List all domains on the server |
+| `get_domain_info` | Get information about a specific domain |
+| `add_domain` | Add a domain to an existing account |
+| `change_password` | Change password for a cPanel account |
+| `backup_account` | Create a backup of a cPanel account |
+
+## Usage Examples
+
+With Cursor AI, you can perform tasks like:
+
+- "List all cPanel accounts on my server"
+- "Create a new cPanel account for domain example.com"
+- "Suspend the user john_doe due to payment issues"
+- "What's the current server status?"
+- "Add the domain newdomain.com to the account user123"
+- "Change the password for account client456"
+
+Cursor AI will use the appropriate WHM API tools to execute these tasks.
+
+## Security Considerations
+
+- Store your WHM API token securely
+- Consider running the MCP server behind a reverse proxy with SSL
+- Only allow access to the MCP server from trusted IP addresses
+- Use a strong, unique API token with minimal necessary permissions
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Check server logs for any error messages
+2. Verify your WHM API token has the necessary permissions
+3. Ensure your WHM server is accessible from the MCP server
+4. Confirm that CORS headers are properly set if accessing from different domains
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Acknowledgments
+
+- [Cursor AI](https://cursor.sh/) for providing the AI assistant integration
+- cPanel/WHM for their comprehensive API
