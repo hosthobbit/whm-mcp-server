@@ -1,235 +1,189 @@
-/**
- * Spec-compliant MCP server for Cursor integration
- * Backwards compatible version for older Node.js
- * Run with: node mcp-server-compat.js
- */
+const express = require('express');
+const app = express();
+const cors = require('cors');
+const dotenv = require('dotenv');
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+// Load environment variables
+dotenv.config();
 
-// Enable detailed logging
-const DEBUG = true;
+// Set up middleware
+app.use(cors());
+app.use(express.json());
 
-// Logger function
-function log(message) {
-  const timestamp = new Date().toISOString();
-  console.log(`${timestamp} - ${message}`);
-  
-  // Also log to file if needed
-  try {
-    const logsDir = path.join(__dirname, 'logs');
-    if (!fs.existsSync(logsDir)) {
-      fs.mkdirSync(logsDir, { recursive: true });
-    }
-    fs.appendFileSync(path.join(logsDir, 'mcp-server.log'), `${timestamp} - ${message}\n`);
-  } catch (error) {
-    console.error(`Error writing to log file: ${error.message}`);
-  }
-}
+// Client connections
+const clients = new Map();
+let clientIdCounter = 0;
 
-// Create the server
-const server = http.createServer((req, res) => {
-  log(`${req.method} ${req.url}`);
-  
-  // Log headers in debug mode
-  if (DEBUG) {
-    log(`Headers: ${JSON.stringify(req.headers)}`);
-  }
-  
-  // Handle SSE endpoint for MCP
-  if (req.url === '/sse') {
-    handleSSE(req, res);
-    return;
-  }
-  
-  // Handle other routes
-  if (req.url === '/') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      name: 'WHM MCP Server',
-      status: 'running',
-      endpoints: {
-        sse: '/sse'
-      }
-    }));
-    return;
-  }
-  
-  // 404 for everything else
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not Found' }));
+// Basic route for API status
+app.get('/', (req, res) => {
+  res.json({
+    message: 'WHM MCP Server',
+    status: 'active',
+    version: '1.0.0'
+  });
 });
 
-// Handle SSE connections
-function handleSSE(req, res) {
-  log('SSE connection request received');
+// SSE endpoint
+app.get('/sse', (req, res) => {
+  const clientId = (++clientIdCounter).toString();
+  
+  console.log(`${new Date().toISOString()} - GET /sse`);
+  console.log(`${new Date().toISOString()} - Headers: ${JSON.stringify(req.headers)}`);
+  console.log(`${new Date().toISOString()} - SSE connection request received`);
   
   // Set headers for SSE
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
   
-  log('SSE connection established');
-  
-  // Wait for initialize message from client
-  let initialized = false;
-  let clientId = null;
-  
-  // Function to send events
-  const sendEvent = (data) => {
-    const event = `data: ${JSON.stringify(data)}\n\n`;
-    log(`Sending: ${event.trim()}`);
-    res.write(event);
+  // Send initial connection message following JSON-RPC 2.0 format
+  const initialMessage = {
+    jsonrpc: "2.0",
+    id: clientId,
+    method: "connection/established",
+    params: {
+      status: "connected",
+      clientId: clientId,
+      timestamp: new Date().toISOString()
+    }
   };
   
-  // Define tool schema
-  const tools = [
-    {
-      name: "example_tool",
-      description: "An example tool to show MCP integration",
-      parameters: {
-        type: "object",
-        properties: {
-          message: {
-            type: "string",
-            description: "A message to echo back"
-          }
-        },
-        required: ["message"]
-      }
-    },
-    {
-      name: "get_server_status",
-      description: "Get the current status of the WHM MCP server",
-      parameters: {
-        type: "object",
-        properties: {},
-        required: []
-      }
-    }
-  ];
+  res.write(`data: ${JSON.stringify(initialMessage)}\n\n`);
+  console.log(`${new Date().toISOString()} - SSE connection established`);
   
-  // Handle incoming data (for initialize message)
-  let buffer = '';
-  req.on('data', (chunk) => {
-    buffer += chunk.toString();
-    
-    try {
-      // Try to parse lines from buffer
-      const lines = buffer.split('\\n');
-      buffer = lines.pop(); // Keep the last incomplete line in buffer
-      
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        
-        const message = JSON.parse(line);
-        log(`Received message: ${JSON.stringify(message)}`);
-        
-        // Handle initialize message
-        if (message.method === 'initialize') {
-          log('Initialize message received');
-          initialized = true;
-          // Fix for older Node.js versions - no optional chaining
-          clientId = message.params && message.params.client_id ? message.params.client_id : 'unknown';
-          
-          // Send initialize response with available tools
-          sendEvent({
-            jsonrpc: "2.0",
-            id: message.id,
-            result: {
-              tools: tools
-            }
-          });
-        }
-        // Handle tool invocation
-        else if (message.method === 'invoke' && initialized) {
-          // Fix for older Node.js versions - no optional chaining
-          const toolName = message.params && message.params.name ? message.params.name : null;
-          const params = message.params && message.params.parameters ? message.params.parameters : {};
-          
-          log(`Tool invocation: ${toolName} with params: ${JSON.stringify(params)}`);
-          
-          // Handle example_tool
-          if (toolName === 'example_tool') {
-            sendEvent({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: {
-                content: `Echo: ${params.message}`
-              }
-            });
-          }
-          // Handle get_server_status
-          else if (toolName === 'get_server_status') {
-            sendEvent({
-              jsonrpc: "2.0",
-              id: message.id,
-              result: {
-                content: JSON.stringify({
-                  status: "running",
-                  uptime: process.uptime(),
-                  memory: process.memoryUsage(),
-                  timestamp: new Date().toISOString()
-                }, null, 2)
-              }
-            });
-          }
-          // Unknown tool
-          else {
-            sendEvent({
-              jsonrpc: "2.0",
-              id: message.id,
-              error: {
-                code: -32601,
-                message: `Tool not found: ${toolName}`
-              }
-            });
-          }
-        }
-        // Uninitialized client trying to invoke tools
-        else if (message.method === 'invoke' && !initialized) {
-          log('ERROR: Client tried to invoke tool before initialization');
-          sendEvent({
-            jsonrpc: "2.0",
-            id: message.id,
-            error: {
-              code: -32600,
-              message: "Client must send initialize message first"
-            }
-          });
-        }
-      }
-    } catch (error) {
-      log(`Error processing message: ${error.message}`);
-    }
-  });
-  
-  // Keep the connection alive with a ping every 30 seconds
-  const pingInterval = setInterval(() => {
-    log('Sending ping');
-    sendEvent({ type: 'ping', timestamp: new Date().toISOString() });
-  }, 30000);
+  // Store client connection
+  clients.set(clientId, res);
   
   // Handle client disconnect
   req.on('close', () => {
-    clearInterval(pingInterval);
-    log(`SSE connection closed, client: ${clientId || 'unknown'}`);
+    console.log(`${new Date().toISOString()} - SSE connection closed, client: ${clientId}`);
+    clients.delete(clientId);
   });
-  
-  // Handle errors
-  req.on('error', (error) => {
-    clearInterval(pingInterval);
-    log(`SSE connection error: ${error.message}`);
-  });
-}
+});
 
-// Start the server with a different port since 3000 is in use
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  log(`MCP Server running at http://localhost:${PORT}/`);
-  log(`SSE endpoint available at http://localhost:${PORT}/sse`);
+// MCP message handling endpoint
+app.post('/messages', (req, res) => {
+  try {
+    const { id, method, params } = req.body;
+    
+    console.log(`${new Date().toISOString()} - POST /messages`);
+    console.log(`${new Date().toISOString()} - Message: ${JSON.stringify(req.body)}`);
+    
+    if (!id || !method) {
+      return res.status(400).json({
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: -32600,
+          message: "Invalid Request",
+          data: "Missing required fields (id, method)"
+        }
+      });
+    }
+
+    // Process different method types
+    if (method === "tools/list") {
+      // Return available tools
+      return res.json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          tools: [
+            {
+              name: "example_tool",
+              description: "An example tool to show MCP integration",
+              parameters: {
+                type: "object",
+                properties: {
+                  message: {
+                    type: "string",
+                    description: "A message to echo back"
+                  }
+                },
+                required: ["message"]
+              }
+            },
+            {
+              name: "get_server_status",
+              description: "Get the current status of the WHM MCP server",
+              parameters: {
+                type: "object",
+                properties: {},
+                required: []
+              }
+            }
+          ]
+        }
+      });
+    }
+    
+    if (method === "tools/call") {
+      const { name, arguments: args } = params;
+      
+      if (name === "example_tool") {
+        return res.json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: `Echo: ${args.message || "No message provided"}`
+          }
+        });
+      }
+      
+      if (name === "get_server_status") {
+        return res.json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: JSON.stringify({
+              status: "running",
+              uptime: process.uptime(),
+              memory: process.memoryUsage(),
+              timestamp: new Date().toISOString()
+            }, null, 2)
+          }
+        });
+      }
+      
+      // Unknown tool
+      return res.status(404).json({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: -32601,
+          message: "Method not found",
+          data: `Tool '${name}' is not available`
+        }
+      });
+    }
+    
+    // Unknown method
+    return res.status(404).json({
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32601,
+        message: "Method not found",
+        data: `Method '${method}' is not supported`
+      }
+    });
+  } catch (error) {
+    console.error(`${new Date().toISOString()} - Error processing message:`, error);
+    return res.status(500).json({
+      jsonrpc: "2.0",
+      id: req.body.id || null,
+      error: {
+        code: -32603,
+        message: "Internal error",
+        data: error.message
+      }
+    });
+  }
+});
+
+// Start server
+const PORT = process.env.PORT || 4444;
+app.listen(PORT, () => {
+  console.log(`${new Date().toISOString()} - MCP Server running at http://localhost:${PORT}/`);
+  console.log(`${new Date().toISOString()} - SSE endpoint available at http://localhost:${PORT}/sse`);
 });
