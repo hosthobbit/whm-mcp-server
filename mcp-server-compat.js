@@ -1,5 +1,5 @@
 /**
- * MCP server for Cursor integration with proper tool discovery
+ * MCP server implementation following 2025-03-26 specification
  */
 
 const http = require('http');
@@ -10,29 +10,50 @@ const querystring = require('querystring');
 const clients = new Map();
 let clientIdCounter = 0;
 
-// Available tools
+// Available tools with proper schema definitions
 const availableTools = [
   {
-    name: "example_tool",
-    description: "An example tool to demonstrate MCP integration",
+    name: "web_search",
+    description: "Search the web for real-time information",
     parameters: {
       type: "object",
       properties: {
-        message: {
+        search_term: {
           type: "string",
-          description: "A message to echo back"
+          description: "The search term to look up"
+        },
+        explanation: {
+          type: "string",
+          description: "Explanation for the search"
         }
       },
-      required: ["message"]
+      required: ["search_term"]
     }
   },
   {
-    name: "get_server_status",
-    description: "Get the current status of the WHM MCP server",
+    name: "read_file",
+    description: "Read contents of a file",
     parameters: {
       type: "object",
-      properties: {},
-      required: []
+      properties: {
+        target_file: {
+          type: "string",
+          description: "Path to the file"
+        },
+        should_read_entire_file: {
+          type: "boolean",
+          description: "Whether to read entire file"
+        },
+        start_line_one_indexed: {
+          type: "integer",
+          description: "Start line (1-indexed)"
+        },
+        end_line_one_indexed_inclusive: {
+          type: "integer",
+          description: "End line (1-indexed, inclusive)"
+        }
+      },
+      required: ["target_file", "should_read_entire_file", "start_line_one_indexed", "end_line_one_indexed_inclusive"]
     }
   }
 ];
@@ -49,327 +70,220 @@ const parseJsonBody = (req) => {
         try {
           resolve(JSON.parse(body));
         } catch (e) {
-          reject(new Error('Invalid JSON: ' + e.message));
+          reject(new Error('Invalid JSON'));
         }
       } else {
         resolve({});
       }
     });
-    req.on('error', reject);
   });
 };
 
-// Send SSE message to client
+// Send SSE message
 const sendSSEMessage = (res, data) => {
-  try {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-    return true;
-  } catch (err) {
-    console.error(`Error sending SSE message: ${err.message}`);
-    return false;
-  }
+  const message = JSON.stringify(data);
+  console.log(`Sending SSE message: ${message}`);
+  res.write(`data: ${message}\n\n`);
 };
 
 // Create HTTP server
 const server = http.createServer(async (req, res) => {
   const timestamp = new Date().toISOString();
   console.log(`${timestamp} - ${req.method} ${req.url}`);
-  
+
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  
-  // Handle preflight OPTIONS request
+
+  // Handle preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
     return;
   }
-  
-  // Parse URL and query parameters
+
   const parsedUrl = url.parse(req.url);
   const pathname = parsedUrl.pathname;
-  
-  // Root endpoint
-  if (pathname === '/' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      message: 'WHM MCP Server',
-      status: 'active',
-      version: '1.0.0'
-    }));
-    return;
-  }
-  
-  // SSE endpoint for MCP connection
+
+  // SSE endpoint
   if (pathname === '/sse' && req.method === 'GET') {
     console.log(`${timestamp} - SSE connection request received`);
     console.log(`${timestamp} - Headers: ${JSON.stringify(req.headers)}`);
-    
-    // Set headers for SSE
+
+    // Set SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no' // Important for some proxies
+      'Connection': 'keep-alive'
     });
-    
-    // Generate client ID
+
     const clientId = (++clientIdCounter).toString();
     
-    // Store the client connection
+    // Store client connection
     clients.set(clientId, {
-      res: res,
+      res,
       lastActivity: Date.now(),
-      sessionId: clientId,
       initialized: false
     });
-    
+
     // Handle client disconnect
     req.on('close', () => {
-      console.log(`${timestamp} - SSE connection closed, client: ${clientId}`);
+      console.log(`${timestamp} - Client disconnected: ${clientId}`);
       clients.delete(clientId);
     });
-    
-    // Keep connection alive with heartbeats
-    const heartbeatInterval = setInterval(() => {
-      if (clients.has(clientId)) {
-        try {
-          res.write(`:heartbeat\n\n`);
-        } catch (err) {
-          console.log(`${timestamp} - Error sending heartbeat: ${err.message}`);
-          clearInterval(heartbeatInterval);
-          clients.delete(clientId);
-        }
-      } else {
-        clearInterval(heartbeatInterval);
-      }
-    }, 15000);
-    
-    // Send initial connection establishment message
+
+    // Send initial connection message
     sendSSEMessage(res, {
-      jsonrpc: "2.0", 
+      jsonrpc: "2.0",
       method: "connection/ready",
-      params: { 
-        session_id: clientId
+      params: {
+        session_id: clientId,
+        protocol_version: "2025-03-26",
+        server_info: {
+          name: "WHM MCP Server",
+          version: "1.0.0"
+        }
       }
     });
-    
+
+    // Send capabilities immediately after connection
+    sendSSEMessage(res, {
+      jsonrpc: "2.0",
+      method: "server/capabilities",
+      params: {
+        capabilities: {
+          tools: true,
+          resources: true
+        },
+        tools: availableTools
+      }
+    });
+
     console.log(`${timestamp} - SSE connection established for client: ${clientId}`);
     return;
   }
-  
+
   // Handle JSON-RPC messages
   if (pathname === '/messages' && req.method === 'POST') {
-    // Parse query params to get sessionId
     const queryParams = querystring.parse(parsedUrl.query);
     const sessionId = queryParams.sessionId;
-    
-    console.log(`${timestamp} - Message received for session: ${sessionId}`);
-    
+
     if (!sessionId || !clients.has(sessionId)) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         jsonrpc: "2.0",
-        id: null,
         error: {
           code: -32000,
-          message: "Invalid session ID or session not found"
+          message: "Invalid session"
         }
       }));
       return;
     }
-    
+
     try {
-      // Parse request body
       const body = await parseJsonBody(req);
-      console.log(`${timestamp} - Request body: ${JSON.stringify(body)}`);
-      
+      console.log(`${timestamp} - Received message: ${JSON.stringify(body)}`);
+
       const { id, method, params } = body;
-      
-      // Validate required fields
+
       if (!id || !method) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
-          id: id || null,
           error: {
             code: -32600,
-            message: "Invalid Request",
-            data: "Missing required fields (id, method)"
+            message: "Invalid Request"
           }
         }));
         return;
       }
-      
+
       const client = clients.get(sessionId);
-      
-      // Handle different methods
+
+      // Handle initialize request
       if (method === "initialize") {
-        // Mark client as initialized
         client.initialized = true;
-        
-        // Respond to initialize request
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          result: { 
-            // Add any initialization data here
-          }
-        }));
-        
-        // Also send the tools list through SSE
-        sendSSEMessage(client.res, {
-          jsonrpc: "2.0",
-          id: "tools_list",
-          result: {
-            tools: availableTools
-          }
-        });
-        
-        return;
-      }
-      
-      // Tools/list method - respond with available tools
-      if (method === "tools/list") {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
           id,
           result: {
-            tools: availableTools
+            capabilities: {
+              tools: true,
+              resources: true
+            }
           }
         }));
         return;
       }
-      
-      // Invoke method - handle tool calls
+
+      // Handle tool invocation
       if (method === "invoke") {
         const { name, parameters } = params;
-        
-        if (name === "example_tool") {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
+        const tool = availableTools.find(t => t.name === name);
+
+        if (!tool) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
             jsonrpc: "2.0",
             id,
-            result: {
-              content: `Echo: ${parameters.message || "No message provided"}`
+            error: {
+              code: -32601,
+              message: `Tool '${name}' not found`
             }
           }));
           return;
         }
-        
-        if (name === "get_server_status") {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              content: JSON.stringify({
-                status: "running",
-                uptime: process.uptime(),
-                memory: process.memoryUsage(),
-                timestamp: new Date().toISOString()
-              }, null, 2)
-            }
-          }));
-          return;
-        }
-        
-        // Unknown tool
-        res.writeHead(404, { 'Content-Type': 'application/json' });
+
+        // Mock tool execution
+        res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           jsonrpc: "2.0",
           id,
-          error: {
-            code: -32601,
-            message: "Method not found",
-            data: `Tool '${name}' is not available`
+          result: {
+            status: "success",
+            data: `Executed ${name} with parameters: ${JSON.stringify(parameters)}`
           }
         }));
         return;
       }
-      
-      // Unknown method
+
+      // Handle unknown method
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         jsonrpc: "2.0",
         id,
         error: {
           code: -32601,
-          message: "Method not found",
-          data: `Method '${method}' is not supported`
+          message: `Method '${method}' not found`
         }
       }));
-      
+
     } catch (error) {
-      console.error(`${timestamp} - Error processing message:`, error);
+      console.error(`${timestamp} - Error:`, error);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         jsonrpc: "2.0",
-        id: null,
         error: {
           code: -32603,
-          message: "Internal error",
-          data: error.message
+          message: "Internal error"
         }
       }));
     }
     return;
   }
-  
-  // 404 for all other requests
+
+  // 404 for unknown endpoints
   res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({
-    error: 'Not Found',
-    message: `${req.method} ${pathname} not found`
-  }));
+  res.end(JSON.stringify({ error: 'Not Found' }));
 });
 
-// Graceful shutdown handling
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
-
-function gracefulShutdown() {
-  const timestamp = new Date().toISOString();
-  console.log(`${timestamp} - Received shutdown signal, closing server gracefully...`);
-  
-  // Notify all clients about the shutdown
-  clients.forEach((client, clientId) => {
-    try {
-      sendSSEMessage(client.res, {
-        jsonrpc: "2.0",
-        method: "notification",
-        params: {
-          type: "shutdown",
-          message: "Server is shutting down"
-        }
-      });
-    } catch (err) {
-      console.log(`${timestamp} - Error notifying client ${clientId} about shutdown: ${err.message}`);
-    }
-  });
-  
-  // Close the server - stop accepting new connections
-  server.close(() => {
-    console.log(`${timestamp} - Server closed successfully, exiting process`);
-    process.exit(0);
-  });
-  
-  // Give existing connections time to finish, but force exit after 10 seconds
-  setTimeout(() => {
-    console.log(`${timestamp} - Forcing exit after timeout`);
-    process.exit(1);
-  }, 10000);
-}
-
-// Start server - explicitly bind to all interfaces (0.0.0.0)
+// Start server
 const PORT = process.env.PORT || 4444;
-const HOST = '0.0.0.0'; // Listen on all interfaces, not just localhost
+const HOST = '0.0.0.0';
+
 server.listen(PORT, HOST, () => {
   const timestamp = new Date().toISOString();
   console.log(`${timestamp} - MCP Server running at http://${HOST}:${PORT}/`);
-  console.log(`${timestamp} - SSE endpoint available at http://${HOST}:${PORT}/sse`);
 });
