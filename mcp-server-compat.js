@@ -1,138 +1,407 @@
-const http = require('http');
-const url = require('url');
+const express = require('express');
+const app = express();
+const cors = require('cors');
+const dotenv = require('dotenv');
+const WHMService = require('./src/services/whm.service');
+const logger = require('./src/utils/logger');
 
+// Load environment variables
+dotenv.config();
+
+// Set up middleware
+app.use(cors());
+app.use(express.json());
+
+// Create WHM service instance
+const whmService = new WHMService();
+
+// Client connections
 const clients = new Map();
 let clientIdCounter = 0;
 
-const availableTools = [
+// Basic route for API status
+app.get('/', (req, res) => {
+  res.json({
+    message: 'WHM MCP Server',
+    status: 'active',
+    version: '1.0.0'
+  });
+});
+
+// SSE endpoint
+app.get('/sse', (req, res) => {
+  const clientId = (++clientIdCounter).toString();
+  
+  console.log(`${new Date().toISOString()} - GET /sse`);
+  console.log(`${new Date().toISOString()} - Headers: ${JSON.stringify(req.headers)}`);
+  console.log(`${new Date().toISOString()} - SSE connection request received`);
+  
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  
+  // Send initial connection message following JSON-RPC 2.0 format
+  const initialMessage = {
+    jsonrpc: "2.0",
+    id: clientId,
+    method: "connection/ready",
+    params: {
+      status: "connected",
+      clientId: clientId,
+      timestamp: new Date().toISOString()
+    }
+  };
+  
+  res.write(`data: ${JSON.stringify(initialMessage)}\n\n`);
+  console.log(`${new Date().toISOString()} - SSE connection established`);
+  
+  // Immediately send available tools notification after connection
+  setTimeout(() => {
+    // Following MCP protocol - proactively notify about tools availability
+    const toolsNotification = {
+      jsonrpc: "2.0",
+      method: "tools/ready",
+      params: { }
+    };
+    res.write(`data: ${JSON.stringify(toolsNotification)}\n\n`);
+    console.log(`${new Date().toISOString()} - Sent tools/ready notification`);
+  }, 100);
+  
+  // Store client connection
+  clients.set(clientId, res);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log(`${new Date().toISOString()} - SSE connection closed, client: ${clientId}`);
+    clients.delete(clientId);
+  });
+});
+
+// Define the available WHM tools
+const whmTools = [
+  // Account Management
   {
-    name: "codebase_search",
-    description: "Find snippets of code from the codebase most relevant to the search query",
+    name: "whm_list_accounts",
+    description: "List all WHM accounts on the server",
+    parameters: {}
+  },
+  {
+    name: "whm_create_account",
+    description: "Create a new cPanel account",
     parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "The search query to find relevant code" },
-        target_directories: { type: "array", items: { type: "string" }, description: "Glob patterns for directories to search over" }
+      username: {
+        type: "string",
+        description: "cPanel username (must be 8 characters or less)"
       },
-      required: ["query"]
+      domain: {
+        type: "string",
+        description: "Primary domain name for the account"
+      },
+      password: {
+        type: "string",
+        description: "Password for the account"
+      },
+      email: {
+        type: "string",
+        description: "Contact email for the account owner"
+      },
+      package: {
+        type: "string", 
+        description: "Hosting package name"
+      }
     }
   },
   {
-    name: "read_file",
-    description: "Read contents of a file",
+    name: "whm_account_summary",
+    description: "Get account summary information",
     parameters: {
-      type: "object",
-      properties: {
-        target_file: { type: "string", description: "Path to the file" },
-        should_read_entire_file: { type: "boolean", description: "Whether to read entire file" },
-        start_line_one_indexed: { type: "integer", description: "Start line (1-indexed)" },
-        end_line_one_indexed_inclusive: { type: "integer", description: "End line (1-indexed, inclusive)" }
-      },
-      required: ["target_file", "should_read_entire_file", "start_line_one_indexed", "end_line_one_indexed_inclusive"]
+      username: {
+        type: "string",
+        description: "cPanel username"
+      }
     }
   },
   {
-    name: "edit_file",
-    description: "Edit an existing file or create a new one",
+    name: "whm_suspend_account",
+    description: "Suspend a cPanel account",
     parameters: {
-      type: "object",
-      properties: {
-        target_file: { type: "string", description: "Path to the file to edit" },
-        instructions: { type: "string", description: "Instructions for the edit" },
-        code_edit: { type: "string", description: "The code edit to apply" }
+      username: {
+        type: "string", 
+        description: "cPanel username"
       },
-      required: ["target_file", "instructions", "code_edit"]
+      reason: {
+        type: "string",
+        description: "Reason for suspension"
+      }
+    }
+  },
+  {
+    name: "whm_unsuspend_account",
+    description: "Unsuspend a cPanel account",
+    parameters: {
+      username: {
+        type: "string",
+        description: "cPanel username"
+      }
+    }
+  },
+  {
+    name: "whm_terminate_account",
+    description: "Permanently remove a cPanel account",
+    parameters: {
+      username: {
+        type: "string",
+        description: "cPanel username"
+      }
+    }
+  },
+  
+  // Server Management
+  {
+    name: "whm_server_status",
+    description: "Get the current WHM server status and system statistics",
+    parameters: {}
+  },
+  {
+    name: "whm_server_load",
+    description: "Get server load statistics",
+    parameters: {}
+  },
+  {
+    name: "whm_service_status",
+    description: "Get status of server services",
+    parameters: {}
+  },
+  {
+    name: "whm_restart_service",
+    description: "Restart a specific server service",
+    parameters: {
+      service: {
+        type: "string",
+        description: "Service name (e.g., 'httpd', 'mysql', 'nginx')"
+      }
+    }
+  },
+  {
+    name: "whm_check_updates",
+    description: "Check for available server updates",
+    parameters: {}
+  },
+  {
+    name: "whm_start_update",
+    description: "Start server update process",
+    parameters: {}
+  },
+  
+  // Domain Management
+  {
+    name: "whm_list_domains",
+    description: "List all domains for a cPanel account",
+    parameters: {
+      username: {
+        type: "string",
+        description: "cPanel username"
+      }
+    }
+  },
+  {
+    name: "whm_add_domain",
+    description: "Add a domain to a cPanel account",
+    parameters: {
+      username: {
+        type: "string",
+        description: "cPanel username"
+      },
+      domain: {
+        type: "string",
+        description: "Domain name to add"
+      }
+    }
+  },
+  {
+    name: "whm_delete_domain",
+    description: "Remove a domain from a cPanel account",
+    parameters: {
+      username: {
+        type: "string",
+        description: "cPanel username"
+      },
+      domain: {
+        type: "string",
+        description: "Domain name to remove"
+      }
     }
   }
 ];
 
-const sendSSE = (res, data) => {
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-};
-
-const server = http.createServer((req, res) => {
-  const parsedUrl = url.parse(req.url);
-  
-  if (parsedUrl.pathname === '/sse' && req.method === 'GET') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*'
-    });
-
-    const clientId = (++clientIdCounter).toString();
-    const client = { res, initialized: false };
-    clients.set(clientId, client);
-
-    req.on('close', () => clients.delete(clientId));
-
-    // Send initial connection message
-    sendSSE(res, {
-      jsonrpc: "2.0",
-      method: "connection/ready",
-      params: {
-        session_id: clientId,
-        protocol_version: "2025-03-26",
-        server_info: {
-          name: "WHM MCP Server",
-          version: "1.0.0",
-          capabilities: ["tools"]
+// MCP message handling endpoint
+app.post('/messages', async (req, res) => {
+  try {
+    const { id, method, params } = req.body;
+    
+    console.log(`${new Date().toISOString()} - POST /messages`);
+    console.log(`${new Date().toISOString()} - Message: ${JSON.stringify(req.body)}`);
+    
+    if (!id || !method) {
+      return res.status(400).json({
+        jsonrpc: "2.0",
+        id: null,
+        error: {
+          code: -32600,
+          message: "Invalid Request",
+          data: "Missing required fields (id, method)"
         }
-      }
-    });
+      });
+    }
 
-    // Send capabilities immediately
-    sendSSE(res, {
-      jsonrpc: "2.0",
-      method: "server/capabilities",
-      params: {
-        capabilities: { tools: true },
-        tools: availableTools
-      }
-    });
-
-    return;
-  }
-
-  if (parsedUrl.pathname === '/messages' && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        const message = JSON.parse(body);
-        const { id, method } = message;
-
-        if (method === 'initialize') {
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
+    // Process different method types
+    if (method === "tools/list") {
+      // Return available tools
+      return res.json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          tools: whmTools
+        }
+      });
+    }
+    
+    if (method === "tools/call") {
+      const { name, arguments: args } = params;
+      
+      // Handle WHM-specific tools
+      if (name.startsWith("whm_")) {
+        try {
+          let result;
+          
+          // Account Management
+          if (name === "whm_list_accounts") {
+            result = await whmService.listAccounts();
+          }
+          else if (name === "whm_create_account") {
+            result = await whmService.createAccount({
+              username: args.username,
+              domain: args.domain,
+              password: args.password,
+              contactemail: args.email,
+              plan: args.package
+            });
+          }
+          else if (name === "whm_account_summary") {
+            result = await whmService.getAccountSummary(args.username);
+          }
+          else if (name === "whm_suspend_account") {
+            result = await whmService.suspendAccount(args.username, args.reason);
+          }
+          else if (name === "whm_unsuspend_account") {
+            result = await whmService.unsuspendAccount(args.username);
+          }
+          else if (name === "whm_terminate_account") {
+            result = await whmService.terminateAccount(args.username);
+          }
+          
+          // Server Management
+          else if (name === "whm_server_status") {
+            result = await whmService.getServerStatus();
+          }
+          else if (name === "whm_server_load") {
+            result = await whmService.getServerLoad();
+          }
+          else if (name === "whm_service_status") {
+            result = await whmService.getServiceStatus();
+          }
+          else if (name === "whm_restart_service") {
+            result = await whmService.restartService(args.service);
+          }
+          else if (name === "whm_check_updates") {
+            result = await whmService.checkForUpdates();
+          }
+          else if (name === "whm_start_update") {
+            result = await whmService.startUpdate();
+          }
+          
+          // Domain Management
+          else if (name === "whm_list_domains") {
+            result = await whmService.listDomains(args.username);
+          }
+          else if (name === "whm_add_domain") {
+            result = await whmService.addDomain(args.username, args.domain);
+          }
+          else if (name === "whm_delete_domain") {
+            result = await whmService.deleteDomain(args.username, args.domain);
+          }
+          else {
+            // Unknown WHM tool
+            return res.status(404).json({
+              jsonrpc: "2.0",
+              id,
+              error: {
+                code: -32601,
+                message: "Method not found",
+                data: `Tool '${name}' is not available`
+              }
+            });
+          }
+          
+          return res.json({
             jsonrpc: "2.0",
             id,
-            result: {
-              capabilities: { tools: true }
+            result
+          });
+        } catch (error) {
+          logger.error(`WHM API Error: ${error.message}`);
+          return res.status(500).json({
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: -32603,
+              message: "WHM API Error",
+              data: error.message
             }
-          }));
-          return;
+          });
         }
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: "2.0", id, result: {} }));
-      } catch (error) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-          jsonrpc: "2.0", 
-          error: { code: -32700, message: "Parse error" }
-        }));
+      }
+      
+      // Unknown tool
+      return res.status(404).json({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: -32601,
+          message: "Method not found",
+          data: `Tool '${name}' is not available`
+        }
+      });
+    }
+    
+    // Unknown method
+    return res.status(404).json({
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32601,
+        message: "Method not found",
+        data: `Method '${method}' is not supported`
       }
     });
-    return;
+  } catch (error) {
+    console.error(`${new Date().toISOString()} - Error processing message:`, error);
+    return res.status(500).json({
+      jsonrpc: "2.0",
+      id: req.body.id || null,
+      error: {
+        code: -32603,
+        message: "Internal error",
+        data: error.message
+      }
+    });
   }
-
-  res.writeHead(404);
-  res.end();
 });
 
+// Start server
 const PORT = process.env.PORT || 4444;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running at http://0.0.0.0:${PORT}/`);
+app.listen(PORT, () => {
+  console.log(`${new Date().toISOString()} - MCP Server running at http://localhost:${PORT}/`);
+  console.log(`${new Date().toISOString()} - SSE endpoint available at http://localhost:${PORT}/sse`);
 });
