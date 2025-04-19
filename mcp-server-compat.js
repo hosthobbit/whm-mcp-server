@@ -13,21 +13,26 @@ let clientIdCounter = 0;
 // Available tools with proper schema definitions
 const availableTools = [
   {
-    name: "web_search",
-    description: "Search the web for real-time information",
+    name: "codebase_search",
+    description: "Find snippets of code from the codebase most relevant to the search query",
     parameters: {
       type: "object",
       properties: {
-        search_term: {
+        query: {
           type: "string",
-          description: "The search term to look up"
+          description: "The search query to find relevant code"
+        },
+        target_directories: {
+          type: "array",
+          items: { type: "string" },
+          description: "Glob patterns for directories to search over"
         },
         explanation: {
           type: "string",
-          description: "Explanation for the search"
+          description: "One sentence explanation as to why this tool is being used"
         }
       },
-      required: ["search_term"]
+      required: ["query"]
     }
   },
   {
@@ -51,9 +56,105 @@ const availableTools = [
         end_line_one_indexed_inclusive: {
           type: "integer",
           description: "End line (1-indexed, inclusive)"
+        },
+        explanation: {
+          type: "string",
+          description: "One sentence explanation as to why this tool is being used"
         }
       },
       required: ["target_file", "should_read_entire_file", "start_line_one_indexed", "end_line_one_indexed_inclusive"]
+    }
+  },
+  {
+    name: "edit_file",
+    description: "Edit an existing file or create a new one",
+    parameters: {
+      type: "object",
+      properties: {
+        target_file: {
+          type: "string",
+          description: "Path to the file to edit"
+        },
+        instructions: {
+          type: "string",
+          description: "Instructions for the edit"
+        },
+        code_edit: {
+          type: "string",
+          description: "The code edit to apply"
+        }
+      },
+      required: ["target_file", "instructions", "code_edit"]
+    }
+  },
+  {
+    name: "list_dir",
+    description: "List contents of a directory",
+    parameters: {
+      type: "object",
+      properties: {
+        relative_workspace_path: {
+          type: "string",
+          description: "Path to list contents of"
+        },
+        explanation: {
+          type: "string",
+          description: "One sentence explanation as to why this tool is being used"
+        }
+      },
+      required: ["relative_workspace_path"]
+    }
+  },
+  {
+    name: "grep_search",
+    description: "Fast text-based regex search",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "The regex pattern to search for"
+        },
+        include_pattern: {
+          type: "string",
+          description: "Glob pattern for files to include"
+        },
+        exclude_pattern: {
+          type: "string",
+          description: "Glob pattern for files to exclude"
+        },
+        case_sensitive: {
+          type: "boolean",
+          description: "Whether the search should be case sensitive"
+        },
+        explanation: {
+          type: "string",
+          description: "One sentence explanation as to why this tool is being used"
+        }
+      },
+      required: ["query"]
+    }
+  },
+  {
+    name: "run_terminal_cmd",
+    description: "Run a terminal command",
+    parameters: {
+      type: "object",
+      properties: {
+        command: {
+          type: "string",
+          description: "The terminal command to execute"
+        },
+        is_background: {
+          type: "boolean",
+          description: "Whether to run in background"
+        },
+        explanation: {
+          type: "string",
+          description: "One sentence explanation as to why this command needs to be run"
+        }
+      },
+      required: ["command", "is_background"]
     }
   }
 ];
@@ -142,7 +243,8 @@ const server = http.createServer(async (req, res) => {
         protocol_version: "2025-03-26",
         server_info: {
           name: "WHM MCP Server",
-          version: "1.0.0"
+          version: "1.0.0",
+          capabilities: ["tools", "resources"]
         }
       }
     });
