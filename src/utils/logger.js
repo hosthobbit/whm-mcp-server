@@ -1,48 +1,51 @@
-const winston = require('winston');
-const path = require('path');
+/**
+ * Logging utility for the application
+ * Using Winston for flexible logging
+ */
 
-// Create logger configuration
-const logger = winston.createLogger({
+const { createLogger, format, transports } = require('winston');
+const { combine, timestamp, printf, colorize } = format;
+
+// Custom log format
+const logFormat = printf(({ level, message, timestamp }) => {
+  return `${timestamp} [${level}]: ${message}`;
+});
+
+// Create the logger instance
+const logger = createLogger({
   level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-    winston.format.errors({ stack: true }),
-    winston.format.splat(),
-    winston.format.json()
+  format: combine(
+    timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    logFormat
   ),
-  defaultMeta: { service: 'whm-mcp' },
   transports: [
-    // Write to all logs with level 'info' and below to combined.log
-    new winston.transports.File({ 
-      filename: path.join('logs', 'combined.log'),
-      maxsize: 5242880, // 5MB
-      maxFiles: 5,
+    // Console transport
+    new transports.Console({
+      format: combine(
+        colorize(),
+        timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        logFormat
+      )
     }),
-    // Write all logs with level 'error' and below to error.log
-    new winston.transports.File({ 
-      filename: path.join('logs', 'error.log'), 
+    // File transport for all logs
+    new transports.File({ 
+      filename: 'logs/combined.log',
+      maxsize: 5242880, // 5MB
+      maxFiles: 5
+    }),
+    // Separate file for error logs
+    new transports.File({ 
+      filename: 'logs/error.log', 
       level: 'error',
       maxsize: 5242880, // 5MB
-      maxFiles: 5,
+      maxFiles: 5
     })
   ]
 });
 
-// If we're not in production, also log to the console with colorized output
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: winston.format.combine(
-      winston.format.colorize(),
-      winston.format.simple()
-    )
-  }));
+// If we're in a production environment, don't log to console
+if (process.env.NODE_ENV === 'production') {
+  logger.remove(transports.Console);
 }
-
-// Create a stream object for Morgan to write to
-logger.stream = {
-  write: (message) => {
-    logger.info(message.trim());
-  }
-};
 
 module.exports = logger;
