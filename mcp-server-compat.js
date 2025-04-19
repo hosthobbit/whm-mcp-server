@@ -37,7 +37,6 @@ const parseJsonBody = (req) => {
 const server = http.createServer(async (req, res) => {
   const timestamp = new Date().toISOString();
   console.log(`${timestamp} - ${req.method} ${req.url}`);
-  console.log(`${timestamp} - Headers: ${JSON.stringify(req.headers)}`);
   
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -69,6 +68,7 @@ const server = http.createServer(async (req, res) => {
   // SSE endpoint for MCP connection
   if (pathname === '/sse' && req.method === 'GET') {
     console.log(`${timestamp} - SSE connection request received`);
+    console.log(`${timestamp} - Headers: ${JSON.stringify(req.headers)}`);
     
     // Set headers for SSE
     res.writeHead(200, {
@@ -108,18 +108,8 @@ const server = http.createServer(async (req, res) => {
       }
     }, 15000);
     
-    // Send initial connection message in JSON-RPC 2.0 format
-    res.write(`data: ${JSON.stringify({
-      jsonrpc: "2.0",
-      id: "init",
-      result: {
-        sessionId: clientId,
-        status: "connected",
-        server: "WHM MCP Server",
-        version: "1.0.0"
-      }
-    })}\n\n`);
-    
+    // The MCP protocol expects the client to send an initialize message first
+    // So we'll just wait for the client to send that and not respond right away
     console.log(`${timestamp} - SSE connection established for client: ${clientId}`);
     return;
   }
@@ -168,6 +158,54 @@ const server = http.createServer(async (req, res) => {
       }
       
       // Handle different methods
+      if (method === "initialize") {
+        // Client is initializing the connection
+        const clientConnection = clients.get(sessionId);
+        if (clientConnection) {
+          // Send initialize response with available tools
+          clientConnection.res.write(`data: ${JSON.stringify({
+            jsonrpc: "2.0",
+            id: id, // Use the same ID the client sent
+            result: {
+              tools: [
+                {
+                  name: "example_tool",
+                  description: "An example tool to show MCP integration",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      message: {
+                        type: "string",
+                        description: "A message to echo back"
+                      }
+                    },
+                    required: ["message"]
+                  }
+                },
+                {
+                  name: "get_server_status",
+                  description: "Get the current status of the WHM MCP server",
+                  parameters: {
+                    type: "object",
+                    properties: {},
+                    required: []
+                  }
+                }
+              ]
+            }
+          })}\n\n`);
+        }
+        
+        // Also respond to the HTTP request
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: id,
+          result: {}
+        }));
+        return;
+      }
+      
       if (method === "tools/list") {
         // Return available tools
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -205,8 +243,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       
-      if (method === "tools/call") {
-        const { name, arguments: args } = params;
+      if (method === "invoke") {
+        const { name, parameters } = params;
         
         if (name === "example_tool") {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -214,7 +252,7 @@ const server = http.createServer(async (req, res) => {
             jsonrpc: "2.0",
             id,
             result: {
-              content: `Echo: ${args.message || "No message provided"}`
+              content: `Echo: ${parameters.message || "No message provided"}`
             }
           }));
           return;
@@ -286,6 +324,43 @@ const server = http.createServer(async (req, res) => {
     message: `${req.method} ${pathname} not found`
   }));
 });
+
+// Graceful shutdown handling
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+function gracefulShutdown() {
+  const timestamp = new Date().toISOString();
+  console.log(`${timestamp} - Received shutdown signal, closing server gracefully...`);
+  
+  // Notify all clients about the shutdown
+  clients.forEach((client, clientId) => {
+    try {
+      client.res.write(`data: ${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "server_shutdown",
+        method: "notification",
+        params: {
+          message: "Server is shutting down"
+        }
+      })}\n\n`);
+    } catch (err) {
+      console.log(`${timestamp} - Error notifying client ${clientId} about shutdown: ${err.message}`);
+    }
+  });
+  
+  // Close the server - stop accepting new connections
+  server.close(() => {
+    console.log(`${timestamp} - Server closed successfully, exiting process`);
+    process.exit(0);
+  });
+  
+  // Give existing connections time to finish, but force exit after 10 seconds
+  setTimeout(() => {
+    console.log(`${timestamp} - Forcing exit after timeout`);
+    process.exit(1);
+  }, 10000);
+}
 
 // Start server
 const PORT = process.env.PORT || 4444;
