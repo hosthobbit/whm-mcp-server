@@ -1,14 +1,17 @@
 # WHM Administration MCP Server
 
-A specialized MCP (Machine Conversion Protocol) server for WebHost Manager (WHM) administration through Cursor IDE.
+This is a WebHost Manager (WHM) administration server implementing the [Model-Client-Proxy (MCP) protocol](https://github.com/cursor-ai/model-client-proxy-protocol), allowing you to administer your WHM server directly through Cursor AI.
 
 ## Features
 
-- **Admin Tools**: Manage cPanel accounts, monitor server status, and perform administrative tasks
-- **MCP Protocol Support**: Full implementation of the MCP protocol for Cursor and Claude integration
-- **Secure Authentication**: API key authentication for all protected routes
+- Use Cursor AI to manage your WHM/cPanel server
+- List, create, suspend, and terminate cPanel accounts
+- View server status information
+- List domains and manage domain settings
+- Create account backups
+- Supports both live WHM API connection and mock data for testing
 
-## Setup Instructions
+## Setup
 
 1. Clone this repository:
    ```
@@ -21,73 +24,113 @@ A specialized MCP (Machine Conversion Protocol) server for WebHost Manager (WHM)
    npm install
    ```
 
-3. Create a `.env` file in the root directory with your configuration:
+3. Create a `.env` file with your WHM API credentials:
    ```
-   PORT=3001
-   WHM_API_URL=https://yourdomain.com:2087/json-api/
-   WHM_API_TOKEN=your_whm_api_token
+   WHM_API_URL=https://yourserver.com:2087
+   WHM_API_USERNAME=root
+   WHM_API_TOKEN=your_api_token
    ```
 
 4. Start the server:
    ```
-   node index.js
+   npm start
    ```
 
-## WHM API Integration
+The server will run on port 3001 by default. You can change this by setting the `PORT` environment variable.
 
-This server requires a WHM API token for authentication with your WHM server. To generate a token:
+## Integration with Cursor
 
-1. Log in to your WHM as root
-2. Navigate to Development → Manage API Tokens
-3. Create a new token and set appropriate permissions
-4. Copy the token to your `.env` file
-
-## Available MCP Tools
-
-| Tool Name | Description |
-|-----------|-------------|
-| whm_list_accounts | List all cPanel accounts on the server |
-| whm_create_account | Create a new cPanel account |
-| whm_suspend_account | Suspend a cPanel account |
-| whm_unsuspend_account | Unsuspend a cPanel account |
-| whm_terminate_account | Permanently terminate a cPanel account |
-| whm_server_status | Get server status information |
-| whm_list_domains | List all domains on the server |
-| whm_backup_account | Create a backup of a cPanel account |
-
-## Using with Cursor & Claude
-
-1. Configure your Cursor IDE to connect to your MCP server
-2. Add the following to your `mcp.json` file:
+1. Point Cursor to your MCP server by adding this to your `~/.cursor/mcp.json` file:
    ```json
    {
-     "mcpEndpoint": "ws://your-server-ip:3001"
+     "mcpServers": [
+       {
+         "url": "ws://your-server-address:3001",
+         "authentication": {
+           "type": "none"
+         }
+       }
+     ]
    }
    ```
-3. Once connected, Claude will have access to all WHM administration tools
 
-## Production Deployment
+2. Once connected, Cursor AI will have access to all WHM administration tools.
 
-For production use, we recommend:
+## Available Tools
 
-1. Running behind a reverse proxy (Nginx/Apache) with SSL
-2. Using PM2 for process management:
+The WHM MCP server provides the following tools:
+
+### whm_list_accounts
+List all cPanel accounts on the server. Optionally filter by search string.
+
+Parameters:
+- `search` (optional): Search string to filter accounts
+
+### whm_create_account
+Create a new cPanel account.
+
+Parameters:
+- `username`: Username for the new account
+- `domain`: Primary domain for the account
+- `plan` (optional): Hosting plan for the account
+- `email`: Email address for the account owner
+
+### whm_suspend_account
+Suspend a cPanel account.
+
+Parameters:
+- `username`: Username of the account to suspend
+- `reason` (optional): Reason for suspension
+
+### whm_unsuspend_account
+Unsuspend a cPanel account.
+
+Parameters:
+- `username`: Username of the account to unsuspend
+
+### whm_terminate_account
+Permanently terminate a cPanel account.
+
+Parameters:
+- `username`: Username of the account to terminate
+- `keepdns` (optional): Whether to keep DNS entries after termination
+
+### whm_server_status
+Get server status information (load, memory, disk usage).
+
+### whm_list_domains
+List all domains on the server.
+
+Parameters:
+- `account` (optional): Account username to filter domains
+
+### whm_backup_account
+Create a backup of a cPanel account.
+
+Parameters:
+- `username`: Username of the account to backup
+- `email` (optional): Email to send notification when backup is complete
+
+## Mock Mode
+
+If WHM API credentials are not configured, the server will run in mock mode, using sample data. This is useful for development and testing.
+
+## Deployment
+
+For production deployment, it's recommended to:
+
+1. Use a process manager like PM2:
    ```
    npm install -g pm2
-   pm2 start index.js --name "whm-mcp-server"
+   pm2 start index.js --name whm-mcp
    ```
 
-## Troubleshooting
+2. Set up SSL for secure WebSocket connections (wss://):
+   - Configure a reverse proxy like Nginx
+   - Update your `mcp.json` to use `wss://` instead of `ws://`
 
-If Cursor cannot discover tools:
-1. Check that the server is running and accessible
-2. Verify the WebSocket connection is properly configured
-3. Examine server logs for any protocol errors
+3. Add proper authentication (coming soon)
 
 ## License
 
 MIT
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
