@@ -34,8 +34,12 @@ A Node.js server application that connects to a WHM (Web Host Manager) server fo
    NODE_ENV=development
    LOG_LEVEL=info
 
-   # API Authentication
+   # API Authentication (required, the server refuses to start without it)
+   # Generate one with: openssl rand -hex 32
    API_KEY=your-secret-api-key-here
+
+   # Only if WHM is reached by IP or uses a self-signed certificate:
+   # WHM_INSECURE_TLS=true
    ```
 4. Start the server:
    ```
@@ -118,7 +122,7 @@ This application requires WHM API credentials. Never share your `.env` file or e
 
 When using this MCP server for WHM administration, follow these security recommendations:
 
-1. **API Token Protection**: Keep your WHM API tokens secure and rotate them regularly.
+1. **API Token Protection**: Keep your WHM API tokens secure and rotate them regularly. Create a WHM API token with only the privileges you need rather than using full root access where possible.
 2. **Use TLS/SSL**: Always deploy this server with HTTPS in production environments.
 3. **Firewall Rules**: Restrict access to the MCP server by IP address where possible.
 4. **Regular Updates**: Keep the WHM server updated with the latest security patches.
@@ -145,3 +149,11 @@ This will run a simple test client that connects to the MCP server, requests the
 ## License
 
 ISC
+
+---
+
+## About Host Hobbit
+
+Built and maintained by **[Host Hobbit Ltd](https://hosthobbit.com)**: managed WordPress hosting, WHM/cPanel and VPS administration, security hardening and AI automation for businesses in the UK.
+
+Need help deploying this, or want something similar built for your business? [Get in touch](https://hosthobbit.com).

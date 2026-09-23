@@ -33,7 +33,13 @@ const wss = new WebSocket.Server({ server });
 const connections = new Map();
 
 // API key for authentication
-const API_KEY = process.env.API_KEY || 'YOUR_DEFAULT_API_KEY'; // Replace in production
+// No fallback: a default key published in this repo would let anyone who
+// reads it authenticate and drive WHM. Refuse to start without a real one.
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) {
+  console.error('API_KEY is not set. Add a long random value to .env (e.g. `openssl rand -hex 32`).');
+  process.exit(1);
+}
 
 // Middleware
 app.use(express.json());

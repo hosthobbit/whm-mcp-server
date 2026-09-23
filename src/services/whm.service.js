@@ -22,7 +22,10 @@ class WHMService {
         Accept: 'application/json'
       },
       httpsAgent: new https.Agent({
-        rejectUnauthorized: false // Only use in development - in production, use proper certificates
+        // Verify WHM's certificate by default: skipping it lets anyone on the
+        // network path read the root API token. Set WHM_INSECURE_TLS=true only
+        // for a server reached by IP or with a self-signed certificate.
+        rejectUnauthorized: process.env.WHM_INSECURE_TLS !== 'true'
       })
     });
     

@@ -11,7 +11,7 @@
       }
     },
     "whm": {
-      "url": "http://45.8.224.156:4444/sse"
+      "url": "https://your-mcp-host.example.com/sse"
     }
   }
 }
