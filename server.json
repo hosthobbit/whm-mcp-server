@@ -1,0 +1,69 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hosthobbit/whm-mcp-server",
+  "description": "Lets AI assistants manage WHM/cPanel servers: accounts, domains, email, SSL and backups.",
+  "repository": {
+    "url": "https://github.com/hosthobbit/whm-mcp-server",
+    "source": "github"
+  },
+  "version": "1.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "whm-mcp-server",
+      "version": "1.1.0",
+      "transport": {
+        "type": "sse",
+        "url": "http://localhost:{PORT}/sse"
+      },
+      "environmentVariables": [
+        {
+          "name": "WHM_SERVER",
+          "description": "Hostname of your WHM server",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "WHM_API_TOKEN",
+          "description": "WHM API token",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "WHM_USERNAME",
+          "description": "WHM username (usually root)",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string",
+          "default": "root"
+        },
+        {
+          "name": "WHM_PORT",
+          "description": "WHM API port",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "2087"
+        },
+        {
+          "name": "API_KEY",
+          "description": "Key MCP clients must send (Authorization: Bearer). At least 16 characters.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "PORT",
+          "description": "Port for the MCP SSE endpoint",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string",
+          "default": "4444"
+        }
+      ]
+    }
+  ],
+  "websiteUrl": "https://hosthobbit.com/"
+}
