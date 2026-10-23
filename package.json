@@ -1,7 +1,18 @@
 {
-  "name": "whm",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "whm-mcp-server",
+  "version": "1.1.0",
+  "description": "MCP server that lets AI assistants manage WHM/cPanel servers: accounts, domains, email, SSL, backups and server updates.",
+  "mcpName": "io.github.hosthobbit/whm-mcp-server",
+  "main": "mcp-server-compat.js",
+  "bin": {
+    "whm-mcp-server": "mcp-server-compat.js"
+  },
+  "files": [
+    "mcp-server-compat.js",
+    "src/",
+    "README.md",
+    ".env.example"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
@@ -9,10 +20,28 @@
     "example": "node examples/mcp-client-test.js",
     "mcp": "node mcp-server-compat.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "whm",
+    "cpanel",
+    "web-hosting",
+    "server-management",
+    "ai"
+  ],
+  "author": "Host Hobbit Ltd <sales@hosthobbit.com> (https://hosthobbit.com)",
+  "homepage": "https://github.com/hosthobbit/whm-mcp-server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hosthobbit/whm-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hosthobbit/whm-mcp-server/issues"
+  },
   "license": "ISC",
-  "description": "MCP server to connect to WHM for server administration",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "axios": "^1.8.4",
     "cors": "^2.8.5",

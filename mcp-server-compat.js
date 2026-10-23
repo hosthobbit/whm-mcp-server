@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+const crypto = require('crypto');
 const express = require('express');
 const app = express();
 const cors = require('cors');
@@ -7,6 +9,24 @@ const logger = require('./src/utils/logger');
 
 // Load environment variables
 dotenv.config();
+
+// Every MCP request must carry the API key: anyone who can reach this port could
+// otherwise create, suspend or delete cPanel accounts on the WHM server.
+const API_KEY = process.env.API_KEY;
+if (!API_KEY || API_KEY.length < 16) {
+  console.error('API_KEY is not set (or is shorter than 16 characters). Add a long random value to .env, e.g. `openssl rand -hex 32`.');
+  process.exit(1);
+}
+const expectedKey = crypto.createHash('sha256').update(API_KEY).digest();
+
+// Accepts "Authorization: Bearer <key>" or "X-API-Key: <key>"; compared in constant time.
+function requireApiKey(req, res, next) {
+  const header = req.get('authorization') || '';
+  const given = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : (req.get('x-api-key') || '');
+  const givenHash = crypto.createHash('sha256').update(given).digest();
+  if (given && crypto.timingSafeEqual(givenHash, expectedKey)) return next();
+  return res.status(401).json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: missing or invalid API key' } });
+}
 
 // Set up middleware
 app.use(cors());
@@ -24,16 +44,15 @@ app.get('/', (req, res) => {
   res.json({
     message: 'WHM MCP Server',
     status: 'active',
-    version: '1.0.0'
+    version: require('./package.json').version
   });
 });
 
 // SSE endpoint
-app.get('/sse', (req, res) => {
+app.get('/sse', requireApiKey, (req, res) => {
   const clientId = (++clientIdCounter).toString();
   
   console.log(`${new Date().toISOString()} - GET /sse`);
-  console.log(`${new Date().toISOString()} - Headers: ${JSON.stringify(req.headers)}`);
   console.log(`${new Date().toISOString()} - SSE connection request received`);
   
   // Set headers for SSE
@@ -236,12 +255,13 @@ const whmTools = [
 ];
 
 // MCP message handling endpoint
-app.post('/messages', async (req, res) => {
+app.post('/messages', requireApiKey, async (req, res) => {
   try {
     const { id, method, params } = req.body;
     
     console.log(`${new Date().toISOString()} - POST /messages`);
-    console.log(`${new Date().toISOString()} - Message: ${JSON.stringify(req.body)}`);
+    // log the method only: message bodies can contain passwords
+    console.log(`${new Date().toISOString()} - Method: ${req.body && req.body.method}`);
     
     if (!id || !method) {
       return res.status(400).json({

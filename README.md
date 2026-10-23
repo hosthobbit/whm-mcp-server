@@ -14,56 +14,66 @@ A Node.js server application that connects to a WHM (Web Host Manager) server fo
 - Security Features
 - MCP Protocol Implementation for AI Assistant integration
 
-## Installation
+## Quick start
 
-1. Clone the repository
-2. Install dependencies:
+You need Node.js 18 or newer and a WHM API token.
+
+1. Make a folder for the server and create a `.env` file in it:
    ```
-   npm install
-   ```
-3. Configure the `.env` file with your WHM server details:
-   ```
-   # WHM Server Configuration
    WHM_SERVER=your-server-domain.com
    WHM_PORT=2087
    WHM_USERNAME=root
-   WHM_API_TOKEN=your-api-token-here
-
-   # MCP Server Configuration
-   PORT=3000
-   NODE_ENV=development
-   LOG_LEVEL=info
-
-   # API Authentication (required, the server refuses to start without it)
-   # Generate one with: openssl rand -hex 32
-   API_KEY=your-secret-api-key-here
-
+   WHM_API_TOKEN=your-whm-api-token
    # Only if WHM is reached by IP or uses a self-signed certificate:
    # WHM_INSECURE_TLS=true
-   ```
-4. Start the server:
-   ```
-   npm start
-   ```
 
-For development:
-```
-npm run dev
-```
+   PORT=3000
+   # Required: the server refuses to start without it. Generate one with: openssl rand -hex 32
+   API_KEY=your-long-random-api-key
+   ```
+2. Start the MCP server from that folder:
+   ```
+   npx whm-mcp-server
+   ```
+   Or clone this repository, run `npm install`, then `npm run mcp`.
 
-## MCP Server Configuration
+The MCP endpoint is `http://localhost:3000/sse` (the port comes from `PORT`; it is 4444 if `PORT` isn't set).
 
-To use this MCP server with AI assistants like Claude in Cursor, you need to add the following configuration to your `mcp.json` file:
+## MCP client configuration
+
+Every request must send the API key, either as `Authorization: Bearer <API_KEY>` or as `X-API-Key: <API_KEY>`. Requests without it get `401 Unauthorized`.
+
+For clients that support remote servers with headers (for example Cursor), add this to `mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "whm": {
-      "url": "http://your-server-address:3000/sse"
+      "url": "https://your-mcp-host:3000/sse",
+      "headers": { "Authorization": "Bearer your-long-random-api-key" }
     }
   }
 }
 ```
+
+For clients that only run local commands (for example Claude Desktop), use the `mcp-remote` bridge:
+
+```json
+{
+  "mcpServers": {
+    "whm": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://your-mcp-host:3000/sse", "--header", "Authorization: Bearer your-long-random-api-key"]
+    }
+  }
+}
+```
+
+Run it behind HTTPS and a firewall: anyone with the key can manage the WHM server.
+
+### REST API (optional)
+
+`npm start` runs a separate REST API (`/api/...`, see below), which also requires the API key, sent as an `X-API-Key` header.
 
 ## MCP Implementation Details
 
