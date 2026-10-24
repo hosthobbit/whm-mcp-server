@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/hosthobbit-whm-mcp-server-badge.png)](https://mseep.ai/app/hosthobbit-whm-mcp-server)
+
 # WHM Management Control Panel (MCP)
 
 A Node.js server application that connects to a WHM (Web Host Manager) server for account administration and server management. This application implements the Model Context Protocol (MCP) to allow AI assistants like Claude to interact with WHM APIs.
